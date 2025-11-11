@@ -33,19 +33,45 @@ jobs:
 #          Write-Host "FastAPI started on port 8000"
 #        shell: powershell
 
-      - name: Stop existing FastAPI process
+#      - name: Stop existing FastAPI process
+#        run: |
+#          Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
+#        shell: powershell
+#        continue-on-error: true
+#
+#      - name: Start FastAPI application as background service
+#        run: |
+#          $action = New-ScheduledTaskAction -Execute "python" -Argument "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "${{ github.workspace }}"
+#          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
+#          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Force
+#          Start-ScheduledTask -TaskName "FastAPI_App"
+#          Start-Sleep -Seconds 5
+#        shell: powershell
+
+      - name: Stop existing FastAPI service
         run: |
-          Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
+          nssm stop FastAPIService
+          nssm remove FastAPIService confirm
         shell: powershell
         continue-on-error: true
 
-      - name: Start FastAPI application as background service
+      - name: Install FastAPI as Windows Service
         run: |
-          $action = New-ScheduledTaskAction -Execute "python" -Argument "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "${{ github.workspace }}"
-          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Force
-          Start-ScheduledTask -TaskName "FastAPI_App"
+          $pythonPath = (Get-Command python).Source
+          $projectPath = "${{ github.workspace }}"
+          nssm install FastAPIService $pythonPath "-m" "uvicorn" "main:app" "--host" "0.0.0.0" "--port" "8000"
+          nssm set FastAPIService AppDirectory $projectPath
+          nssm set FastAPIService DisplayName "FastAPI Application Service"
+          nssm set FastAPIService Description "FastAPI service managed by NSSM"
+          nssm set FastAPIService Start SERVICE_AUTO_START
+          nssm start FastAPIService
+        shell: powershell
+
+      - name: Verify service is running
+        run: |
           Start-Sleep -Seconds 5
+          nssm status FastAPIService
+          Invoke-WebRequest -Uri "http://localhost:8000" -TimeoutSec 5
         shell: powershell
 
       - name: Wait for application to be ready
