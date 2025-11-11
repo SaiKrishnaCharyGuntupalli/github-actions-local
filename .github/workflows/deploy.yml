@@ -29,8 +29,25 @@ jobs:
       - name: Start FastAPI application
         run: |
           Start-Process python -ArgumentList "-m","uvicorn","main:app","--host","0.0.0.0","--port","8000" -WindowStyle Hidden
-          Start-Sleep -Seconds 3
+          Start-Sleep -Seconds 5
           Write-Host "FastAPI started on port 8000"
+        shell: powershell
+
+      - name: Wait for application to be ready
+        run: |
+          $maxAttempts = 30
+          $attempt = 0
+          do {
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:8000" -TimeoutSec 2
+              Write-Host "Application is ready!"
+              break
+            } catch {
+              $attempt++
+              Write-Host "Waiting for application... Attempt $attempt"
+              Start-Sleep -Seconds 2
+            }
+          } while ($attempt -lt $maxAttempts)
         shell: powershell
 
       - name: Health check
