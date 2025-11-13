@@ -107,7 +107,13 @@ jobs:
 
       - name: Install serve globally (if not installed)
         run: |
-          npm list -g serve || npm install -g serve
+          $serveInstalled = npm list -g serve 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "serve not found, installing..."
+            npm install -g serve
+          } else {
+            Write-Host "serve is already installed"
+          }
         shell: powershell
         continue-on-error: true
 
