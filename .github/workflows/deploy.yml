@@ -74,10 +74,15 @@ jobs:
       # FRONTEND (React) DEPLOYMENT
       # ============================================
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
+#      - name: Setup Node.js
+#        uses: actions/setup-node@v3
+#        with:
+#          node-version: '18'
+      - name: Verify Node.js Installation
+        run: |
+          Write-Host "Node version: $(node --version)"
+          Write-Host "NPM version: $(npm --version)"
+        shell: powershell
 
       - name: Install Frontend Dependencies
         run: |
