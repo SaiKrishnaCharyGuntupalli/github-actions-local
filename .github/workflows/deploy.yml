@@ -27,19 +27,52 @@ jobs:
 
       - name: Stop existing FastAPI process
         run: |
-          Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
+          # Stop Task Scheduler task first
+          Stop-ScheduledTask -TaskName "FastAPI_App" -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          
+          # Kill all python processes running uvicorn
+          $processes = Get-WmiObject Win32_Process -Filter "name = 'python.exe'" | Where-Object {
+            $_.CommandLine -like "*uvicorn*"
+          }
+          
+          foreach ($proc in $processes) {
+            Write-Host "Stopping process ID: $($proc.ProcessId) - $($proc.CommandLine)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          }
+          
+          Start-Sleep -Seconds 2
+          Write-Host "All FastAPI processes stopped"
         shell: powershell
         continue-on-error: true
 
       - name: Start FastAPI application as background service
         run: |
           $backendPath = Join-Path -Path "${{ github.workspace }}" -ChildPath "backend"
+          
+          # Create action with Hidden window
           $action = New-ScheduledTaskAction -Execute "python" -Argument "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WorkingDirectory $backendPath
+          
+          # Trigger to start immediately
           $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Settings $settings -Force
+          
+          # Settings to run hidden in background
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
+          
+          # Principal to run without user interaction
+          $principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U -RunLevel Highest
+          
+          # Unregister existing task
+          Unregister-ScheduledTask -TaskName "FastAPI_App" -Confirm:$false -ErrorAction SilentlyContinue
+          
+          # Register new task
+          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Settings $settings -Principal $principal -Force
+          
+          # Start the task
           Start-ScheduledTask -TaskName "FastAPI_App"
           Start-Sleep -Seconds 5
+          
+          Write-Host "FastAPI started in background (no window)"
         shell: powershell
 
       - name: Wait for FastAPI to be ready
@@ -74,10 +107,6 @@ jobs:
       # FRONTEND (React) DEPLOYMENT
       # ============================================
 
-#      - name: Setup Node.js
-#        uses: actions/setup-node@v3
-#        with:
-#          node-version: '18'
       - name: Verify Node.js Installation
         run: |
           Write-Host "Node version: $(node --version)"
@@ -100,8 +129,22 @@ jobs:
 
       - name: Stop existing React process
         run: |
-          # Stop any existing serve processes
-          Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*serve*"} | Stop-Process -Force
+          # Stop Task Scheduler task first
+          Stop-ScheduledTask -TaskName "React_App" -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          
+          # Kill all node processes running serve
+          $processes = Get-WmiObject Win32_Process -Filter "name = 'node.exe'" | Where-Object {
+            $_.CommandLine -like "*serve*"
+          }
+          
+          foreach ($proc in $processes) {
+            Write-Host "Stopping process ID: $($proc.ProcessId) - $($proc.CommandLine)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          }
+          
+          Start-Sleep -Seconds 2
+          Write-Host "All React serve processes stopped"
         shell: powershell
         continue-on-error: true
 
@@ -119,13 +162,31 @@ jobs:
 
       - name: Start React application as background service
         run: |
-          $frontendPath = Join-Path -Path "${{ github.workspace }}" -ChildPath "frontend\build"
-          $action = New-ScheduledTaskAction -Execute "serve" -Argument "-s build -l 3000" -WorkingDirectory (Join-Path -Path "${{ github.workspace }}" -ChildPath "frontend")
+          $frontendPath = Join-Path -Path "${{ github.workspace }}" -ChildPath "frontend"
+          
+          # Create action with Hidden window
+          $action = New-ScheduledTaskAction -Execute "serve" -Argument "-s build -l 3000" -WorkingDirectory $frontendPath
+          
+          # Trigger to start immediately
           $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "React_App" -Settings $settings -Force
+          
+          # Settings to run hidden in background
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
+          
+          # Principal to run without user interaction
+          $principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U -RunLevel Highest
+          
+          # Unregister existing task
+          Unregister-ScheduledTask -TaskName "React_App" -Confirm:$false -ErrorAction SilentlyContinue
+          
+          # Register new task
+          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "React_App" -Settings $settings -Principal $principal -Force
+          
+          # Start the task
           Start-ScheduledTask -TaskName "React_App"
           Start-Sleep -Seconds 10
+          
+          Write-Host "React app started in background (no window)"
         shell: powershell
 
       - name: Wait for React app to be ready
