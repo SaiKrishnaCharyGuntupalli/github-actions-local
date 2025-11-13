@@ -1,4 +1,4 @@
-name: Deploy FastAPI to Local Machine
+name: Deploy FastAPI and React to Local Machine
 
 on:
   push:
@@ -14,91 +14,143 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install dependencies
+      # ============================================
+      # BACKEND (FastAPI) DEPLOYMENT
+      # ============================================
+
+      - name: Install Backend Dependencies
         run: |
+          cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
         shell: powershell
 
-#      - name: Stop existing application
-#        run: |
-#          Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
-#        shell: powershell
-#        continue-on-error: true
-#
-#      - name: Start FastAPI application
-#        run: |
-#          Start-Process python -ArgumentList "-m","uvicorn","main:app","--host","0.0.0.0","--port","8000" -WindowStyle Hidden
-#          Start-Sleep -Seconds 5
-#          Write-Host "FastAPI started on port 8000"
-#        shell: powershell
-
-#      - name: Stop existing FastAPI process
-#        run: |
-#          Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
-#        shell: powershell
-#        continue-on-error: true
-#
-#      - name: Start FastAPI application as background service
-#        run: |
-#          $action = New-ScheduledTaskAction -Execute "python" -Argument "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "${{ github.workspace }}"
-#          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-#          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Force
-#          Start-ScheduledTask -TaskName "FastAPI_App"
-#          Start-Sleep -Seconds 5
-#        shell: powershell
-
-      - name: Stop existing FastAPI service
+      - name: Stop existing FastAPI process
         run: |
-          nssm stop FastAPIService
-          nssm remove FastAPIService confirm
+          Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*uvicorn*"} | Stop-Process -Force
         shell: powershell
         continue-on-error: true
 
-      - name: Install FastAPI as Windows Service
+      - name: Start FastAPI application as background service
         run: |
-          $pythonPath = (Get-Command python).Source
-          $projectPath = "${{ github.workspace }}"
-          nssm install FastAPIService $pythonPath "-m" "uvicorn" "main:app" "--host" "0.0.0.0" "--port" "8000"
-          nssm set FastAPIService AppDirectory $projectPath
-          nssm set FastAPIService DisplayName "FastAPI Application Service"
-          nssm set FastAPIService Description "FastAPI service managed by NSSM"
-          nssm set FastAPIService Start SERVICE_AUTO_START
-          nssm start FastAPIService
-        shell: powershell
-
-      - name: Verify service is running
-        run: |
+          $backendPath = Join-Path -Path "${{ github.workspace }}" -ChildPath "backend"
+          $action = New-ScheduledTaskAction -Execute "python" -Argument "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WorkingDirectory $backendPath
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "FastAPI_App" -Settings $settings -Force
+          Start-ScheduledTask -TaskName "FastAPI_App"
           Start-Sleep -Seconds 5
-          nssm status FastAPIService
-          Invoke-WebRequest -Uri "http://localhost:8000" -TimeoutSec 5
         shell: powershell
 
-      - name: Wait for application to be ready
+      - name: Wait for FastAPI to be ready
         run: |
           $maxAttempts = 30
           $attempt = 0
           do {
             try {
-              $response = Invoke-WebRequest -Uri "http://localhost:8000" -TimeoutSec 2
-              Write-Host "Application is ready!"
+              $response = Invoke-WebRequest -Uri "http://localhost:8000" -TimeoutSec 2 -UseBasicParsing
+              Write-Host "FastAPI is ready!"
               break
             } catch {
               $attempt++
-              Write-Host "Waiting for application... Attempt $attempt"
+              Write-Host "Waiting for FastAPI... Attempt $attempt"
               Start-Sleep -Seconds 2
             }
           } while ($attempt -lt $maxAttempts)
         shell: powershell
 
-      - name: Health check
+      - name: FastAPI Health check
         run: |
-          Start-Sleep -Seconds 5
           try {
             $response = Invoke-WebRequest -Uri "http://localhost:8000" -UseBasicParsing
-            Write-Host "Health check passed - Status: $($response.StatusCode)"
+            Write-Host "FastAPI Health check passed - Status: $($response.StatusCode)"
           } catch {
-            Write-Host "Health check failed: $_"
+            Write-Host "FastAPI Health check failed: $_"
+            exit 1
           }
         shell: powershell
+
+      # ============================================
+      # FRONTEND (React) DEPLOYMENT
+      # ============================================
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+        shell: powershell
+
+      - name: Build React Application
+        run: |
+          cd frontend
+          npm run build
+        shell: powershell
+        env:
+          CI: false
+
+      - name: Stop existing React process
+        run: |
+          # Stop any existing serve processes
+          Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {$_.CommandLine -like "*serve*"} | Stop-Process -Force
+        shell: powershell
         continue-on-error: true
+
+      - name: Install serve globally (if not installed)
+        run: |
+          npm list -g serve || npm install -g serve
+        shell: powershell
+        continue-on-error: true
+
+      - name: Start React application as background service
+        run: |
+          $frontendPath = Join-Path -Path "${{ github.workspace }}" -ChildPath "frontend\build"
+          $action = New-ScheduledTaskAction -Execute "serve" -Argument "-s build -l 3000" -WorkingDirectory (Join-Path -Path "${{ github.workspace }}" -ChildPath "frontend")
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+          Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "React_App" -Settings $settings -Force
+          Start-ScheduledTask -TaskName "React_App"
+          Start-Sleep -Seconds 10
+        shell: powershell
+
+      - name: Wait for React app to be ready
+        run: |
+          $maxAttempts = 30
+          $attempt = 0
+          do {
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:3000" -TimeoutSec 2 -UseBasicParsing
+              Write-Host "React app is ready!"
+              break
+            } catch {
+              $attempt++
+              Write-Host "Waiting for React app... Attempt $attempt"
+              Start-Sleep -Seconds 2
+            }
+          } while ($attempt -lt $maxAttempts)
+        shell: powershell
+
+      - name: React Health check
+        run: |
+          try {
+            $response = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing
+            Write-Host "React Health check passed - Status: $($response.StatusCode)"
+          } catch {
+            Write-Host "React Health check failed: $_"
+            exit 1
+          }
+        shell: powershell
+
+      - name: Deployment Summary
+        run: |
+          Write-Host "================================"
+          Write-Host "Deployment Successful!"
+          Write-Host "================================"
+          Write-Host "FastAPI Backend: http://localhost:8000"
+          Write-Host "React Frontend: http://localhost:3000"
+          Write-Host "================================"
+        shell: powershell
